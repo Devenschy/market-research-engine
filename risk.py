@@ -111,6 +111,67 @@ class RiskManager:
         quantity = trade_capital / price
         return round(quantity, 8)  # 8 decimal places for crypto compatibility
 
+    def calculate_risk_parity_size(self, symbol: str, price: float,
+                                     price_history: list,
+                                     regime_modifier: float = 1.0) -> float:
+        """
+        Calculate position size using Risk Parity — equal risk contribution per position.
+
+        WHY RISK PARITY BEATS FIXED FRACTIONAL FOR MULTI-ASSET SYSTEMS:
+        Fixed fractional (5% per trade) ignores volatility. A 5% position in
+        Bitcoin (daily vol ~3-4%) and a 5% position in EURUSD (daily vol ~0.3%)
+        are wildly different risk exposures. Bitcoin position has 10x more risk.
+
+        Risk parity fixes this by sizing so each position contributes EQUAL risk:
+        Position Size = (Target Daily Vol $ Amount) / (Asset Daily Volatility)
+
+        Example:
+        - Target: $100 daily vol per position (1% of $10,000 capital)
+        - Bitcoin daily vol: 3% → position = $100 / 0.03 = $3,333 (3.3% of capital)
+        - EURUSD daily vol: 0.3% → position = $100 / 0.003 = $33,333 (capped at 10%)
+
+        This means crypto gets SMALLER positions and forex/low-vol assets get LARGER
+        ones — the opposite of what most retail traders do.
+
+        Falls back to fixed fractional if not enough price history.
+        """
+        import numpy as np
+
+        if not config.RISK_PARITY_ENABLED or len(price_history) < config.RISK_PARITY_VOL_WINDOW + 1:
+            # Fall back to fixed fractional sizing if risk parity not enabled or insufficient data
+            return self.calculate_position_size(price, regime_modifier)
+
+        try:
+            prices = np.array(price_history[-config.RISK_PARITY_VOL_WINDOW:])
+            # Daily log returns: ln(P_t / P_{t-1})
+            # WHY LOG RETURNS: Log returns are time-additive and normally distributed,
+            # making them the correct input for volatility calculations.
+            log_returns = np.diff(np.log(prices))
+            daily_vol = np.std(log_returns)  # Daily volatility as a decimal
+
+            if daily_vol <= 0:
+                return self.calculate_position_size(price, regime_modifier)
+
+            # Target dollar volatility per position
+            target_dollar_vol = self.capital * config.RISK_PARITY_TARGET_VOL
+
+            # Position value = target_dollar_vol / daily_vol
+            position_value = target_dollar_vol / daily_vol
+
+            # Apply regime modifier (reduces size in volatile regimes)
+            position_value *= regime_modifier
+
+            # Apply floor and ceiling as % of capital
+            min_value = self.capital * config.RISK_PARITY_MIN_SIZE
+            max_value = self.capital * config.RISK_PARITY_MAX_SIZE
+            position_value = max(min_value, min(max_value, position_value))
+
+            quantity = position_value / price
+            return round(quantity, 8)
+
+        except Exception:
+            return self.calculate_position_size(price, regime_modifier)
+
     def calculate_stop_loss(self, entry_price: float, direction: str) -> float:
         """
         Auto-calculate stop-loss 2% from entry price.
@@ -196,7 +257,8 @@ class RiskManager:
 
     def open_position(self, symbol: str, price: float, direction: str,
                        strategy: str, regime: str, votes: dict,
-                       regime_modifier: float = 1.0) -> Optional[Position]:
+                       regime_modifier: float = 1.0,
+                       price_history: list = None) -> Optional[Position]:
         """
         Open a new paper trading position with all risk parameters set.
 
@@ -208,7 +270,10 @@ class RiskManager:
         if not can_open:
             return None
 
-        quantity = self.calculate_position_size(price, regime_modifier)
+        if price_history and config.RISK_PARITY_ENABLED:
+            quantity = self.calculate_risk_parity_size(symbol, price, price_history, regime_modifier)
+        else:
+            quantity = self.calculate_position_size(price, regime_modifier)
         if quantity <= 0:
             return None
 

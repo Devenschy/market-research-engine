@@ -54,6 +54,18 @@ try:
 except ImportError as e:
     EDGAR_AVAILABLE = False
 
+try:
+    import factors as factors_module
+    FACTORS_AVAILABLE = True
+except ImportError:
+    FACTORS_AVAILABLE = False
+
+try:
+    import events as events_module
+    EVENTS_AVAILABLE = True
+except ImportError:
+    EVENTS_AVAILABLE = False
+
 
 st.set_page_config(
     page_title="Market Research Engine",
@@ -133,13 +145,15 @@ def fetch_live_prices():
 # - Options: Derivatives intelligence layered on top of spot signals
 # - Derivatives: Perps and futures — additional market structure signals
 
-main_tab, options_tab, derivatives_tab, pairs_tab, sentiment_tab, edgar_tab = st.tabs([
+main_tab, options_tab, derivatives_tab, pairs_tab, sentiment_tab, edgar_tab, factors_tab, events_tab = st.tabs([
     "📊 Trading",
     "🎯 Options",
     "⛓ Derivatives",
     "🔗 Pairs / Stat Arb",
     "📰 Sentiment",
-    "🏛 SEC / EDGAR"
+    "🏛 SEC / EDGAR",
+    "📐 Factor Investing",
+    "📅 Events Calendar"
 ])
 
 
@@ -1257,3 +1271,292 @@ Material events in 8-Ks regularly cause 5-20% moves.
                 """)
         else:
             st.info("Click **'Fetch EDGAR Data'** above to load SEC research. Takes ~30-60 seconds due to SEC rate limits.")
+
+
+# =============================================================================
+# TAB 7: FACTOR INVESTING
+# =============================================================================
+
+with factors_tab:
+    st.header("📐 Factor Investing")
+    st.caption(
+        "Momentum · Value · Quality · Low Volatility — the four most research-backed "
+        "return predictors in academic finance. Used by AQR, Dimensional Fund Advisors, "
+        "and most systematic hedge funds."
+    )
+
+    if not FACTORS_AVAILABLE:
+        st.error("factors.py module not found.")
+    else:
+        # Factor explainer
+        with st.expander("What is Factor Investing? (Click to learn)"):
+            st.markdown("""
+**Factor investing** is the systematic pursuit of return premiums that have been documented
+across 50+ years of academic research and live trading.
+
+| Factor | What It Measures | Why It Works |
+|--------|-----------------|--------------|
+| **Momentum** | 12-1 month return | Markets underreact to good news; trends persist |
+| **Value** | P/E ratio (inverse) | Investors overpay for "exciting" growth stocks |
+| **Quality** | ROE, low debt, margins | High-quality companies trade at structural discounts |
+| **Low Vol** | Realized volatility | Institutions overweight risky stocks, leaving low-vol underpriced |
+
+**Signal logic:** 2+ factors agreeing = BUY or SELL. 3+ = STRONG signal.
+Only composite multi-factor signals are high conviction — single-factor signals are noise.
+
+**Note:** Value and Quality only apply to equities (AAPL, MSFT, ASML.AS, SAP.DE).
+Momentum and Low Vol apply to all asset classes including crypto and forex.
+            """)
+
+        factor_symbols = [s for s in config.SYMBOLS
+                          if not s.endswith('=X')]  # Exclude pure forex for cleaner display
+
+        col_btn, col_select = st.columns([1, 2])
+        with col_btn:
+            run_factors = st.button("🔍 Run Factor Analysis", type="primary",
+                                    help="Takes 30-60 seconds — fetches data from Yahoo Finance")
+        with col_select:
+            rank_by = st.selectbox("Rank symbols by:",
+                                   ['composite', 'momentum', 'value', 'quality', 'low_vol'],
+                                   key='factor_rank_by')
+
+        if run_factors or 'factor_results' in st.session_state:
+            if run_factors:
+                with st.spinner("Running factor analysis across all symbols..."):
+                    try:
+                        st.session_state['factor_results'] = factors_module.get_factor_signals(factor_symbols)
+                        st.session_state['factor_ranking'] = factors_module.rank_symbols_by_factor(
+                            factor_symbols, factor=rank_by
+                        )
+                    except Exception as e:
+                        st.error(f"Factor analysis error: {e}")
+
+            factor_results = st.session_state.get('factor_results', {})
+            factor_ranking = st.session_state.get('factor_ranking', [])
+
+            if factor_results:
+                # --- Composite Signal Summary ---
+                st.subheader("Composite Factor Signals")
+
+                signal_rows = []
+                for sym, data in factor_results.items():
+                    composite_sig = data.get('composite_signal') or 'NEUTRAL'
+                    buy_v = data.get('buy_votes', 0)
+                    sell_v = data.get('sell_votes', 0)
+
+                    # Individual factor scores
+                    mom = data.get('momentum')
+                    val = data.get('value')
+                    qual = data.get('quality')
+                    lv = data.get('low_vol')
+
+                    signal_rows.append({
+                        'Symbol': sym,
+                        'Signal': composite_sig,
+                        'Buy Votes': buy_v,
+                        'Sell Votes': sell_v,
+                        'Momentum': f"{mom.get('momentum_return', 0)*100:+.1f}%" if mom else '—',
+                        'Value Score': f"{val.get('value_score', 0):.2f}" if val else '—',
+                        'Quality': f"{qual.get('quality_score', 0):.0f}/100" if qual else '—',
+                        'Low Vol': f"{lv.get('vol_percentile', 0):.2f}" if lv else '—',
+                        'Reasoning': data.get('composite_reason', '')[:80],
+                    })
+
+                sig_df = pd.DataFrame(signal_rows)
+
+                # Color-code signals
+                def color_signal(val):
+                    if 'STRONG_BUY' in str(val):
+                        return 'background-color: #0a4f0a; color: #00ff88'
+                    elif 'BUY' in str(val):
+                        return 'background-color: #1a3d1a; color: #88ff88'
+                    elif 'STRONG_SELL' in str(val):
+                        return 'background-color: #4f0a0a; color: #ff8888'
+                    elif 'SELL' in str(val):
+                        return 'background-color: #3d1a1a; color: #ffaaaa'
+                    return ''
+
+                styled = sig_df.style.applymap(color_signal, subset=['Signal'])
+                st.dataframe(styled, use_container_width=True, hide_index=True)
+
+                # --- Factor Rankings ---
+                if factor_ranking:
+                    st.subheader(f"Symbol Rankings by {rank_by.title()}")
+                    rank_rows = []
+                    for item in factor_ranking:
+                        rank_rows.append({
+                            'Rank': item['rank'],
+                            'Symbol': item['symbol'],
+                            'Score': round(item['score'], 4),
+                            'Designation': item.get('designation', '—'),
+                        })
+
+                    rank_df = pd.DataFrame(rank_rows)
+
+                    def color_designation(val):
+                        if val == 'LONG':
+                            return 'color: #00ff88; font-weight: bold'
+                        elif val == 'SHORT':
+                            return 'color: #ff6666; font-weight: bold'
+                        return 'color: #888888'
+
+                    styled_rank = rank_df.style.applymap(color_designation, subset=['Designation'])
+                    st.dataframe(styled_rank, use_container_width=True, hide_index=True)
+
+                    st.caption(
+                        "**LONG** = top 30% by factor (long book) | "
+                        "**SHORT** = bottom 30% (short book) | "
+                        "**NEUTRAL** = middle 40% (no edge)"
+                    )
+
+                # --- Deep Dive per Symbol ---
+                st.subheader("Deep Dive by Symbol")
+                selected_sym = st.selectbox("Select symbol for factor details:",
+                                             list(factor_results.keys()),
+                                             key='factor_deep_dive')
+
+                if selected_sym and selected_sym in factor_results:
+                    sym_data = factor_results[selected_sym]
+                    c1, c2, c3, c4 = st.columns(4)
+
+                    mom_data = sym_data.get('momentum')
+                    val_data = sym_data.get('value')
+                    qual_data = sym_data.get('quality')
+                    lv_data = sym_data.get('low_vol')
+
+                    with c1:
+                        st.metric("Momentum Signal",
+                                  mom_data.get('signal', 'N/A') if mom_data else 'N/A',
+                                  f"{mom_data.get('momentum_return', 0)*100:+.1f}% 12-1mo" if mom_data else None)
+                    with c2:
+                        st.metric("Value Signal",
+                                  val_data.get('signal', 'N/A') if val_data else 'N/A (non-equity)',
+                                  f"P/E {val_data.get('pe_ratio', '—')}" if val_data else None)
+                    with c3:
+                        st.metric("Quality Signal",
+                                  qual_data.get('signal', 'N/A') if qual_data else 'N/A (non-equity)',
+                                  f"Score {qual_data.get('quality_score', '—')}/100" if qual_data else None)
+                    with c4:
+                        st.metric("Low-Vol Signal",
+                                  lv_data.get('signal', 'N/A') if lv_data else 'N/A',
+                                  f"Vol {lv_data.get('realized_vol', 0)*100:.1f}% ann." if lv_data else None)
+
+                    st.info(f"**Composite reasoning:** {sym_data.get('composite_reason', '—')}")
+        else:
+            st.info("Click **'Run Factor Analysis'** to score all symbols across the four research-backed factors.")
+
+
+# =============================================================================
+# TAB 8: EVENTS CALENDAR
+# =============================================================================
+
+with events_tab:
+    st.header("📅 Events Calendar")
+    st.caption(
+        "Upcoming earnings, dividends, and corporate actions. "
+        "The engine automatically blocks new trades into known binary events."
+    )
+
+    if not EVENTS_AVAILABLE:
+        st.error("events.py module not found.")
+    else:
+        with st.expander("Why Events Matter for Trading (Click to learn)"):
+            st.markdown("""
+**Earnings Announcements** are the most important scheduled events in equity markets:
+- Stocks can gap 5-20% overnight in either direction
+- Trading into earnings is essentially a coin flip — even if you're right on fundamentals, the stock can "sell the news"
+- **IV Crush**: Options premiums collapse after earnings regardless of direction — options buyers often lose even when the stock moves their way
+
+**The engine blocks new positions within 3 days of earnings** to avoid binary event risk.
+
+**Dividend Ex-Dates** create mechanical price adjustments:
+- Stock price drops by ~dividend amount at ex-date open
+- Shorting before ex-date means you owe the dividend (increased cost)
+- The engine blocks new SHORT positions within 2 days of an ex-dividend date
+
+**Post-Earnings Drift (PEAD)**: After a large earnings surprise, stocks tend to continue drifting in the surprise direction for 30-60 days. This is one of the most replicated anomalies in finance. Future version: auto-generate signals based on earnings surprise magnitude.
+            """)
+
+        col_e1, col_e2 = st.columns([1, 3])
+        with col_e1:
+            fetch_events = st.button("📅 Fetch Events", type="primary")
+
+        if fetch_events or 'events_data' in st.session_state:
+            if fetch_events:
+                with st.spinner("Fetching earnings and dividend calendars..."):
+                    try:
+                        st.session_state['events_data'] = events_module.get_all_events(config.SYMBOLS)
+                    except Exception as e:
+                        st.error(f"Events fetch error: {e}")
+
+            events_data = st.session_state.get('events_data', {})
+
+            if events_data:
+                high_risk = events_data.get('high_risk_symbols', [])
+                if high_risk:
+                    st.warning(f"⚠️ High-risk event symbols (next 5 days): **{', '.join(high_risk)}** — engine will block new trades.")
+
+                # --- Earnings ---
+                st.subheader("Upcoming Earnings Announcements")
+                earnings = events_data.get('earnings', [])
+                if earnings:
+                    e_rows = []
+                    for ev in earnings:
+                        e_rows.append({
+                            'Symbol': ev['symbol'],
+                            'Date': ev['date'],
+                            'Days Until': ev['days_until'],
+                            'Risk Level': ev['risk_level'],
+                            'Action': ev['action'],
+                            'Est. EPS': ev.get('estimated_eps', '—'),
+                        })
+                    e_df = pd.DataFrame(e_rows)
+
+                    def color_risk(val):
+                        if val == 'CRITICAL':
+                            return 'background-color: #5c0000; color: #ff4444; font-weight: bold'
+                        elif val == 'HIGH':
+                            return 'background-color: #3d1a00; color: #ff8800'
+                        elif val == 'MEDIUM':
+                            return 'background-color: #3d3d00; color: #ffff44'
+                        return ''
+
+                    st.dataframe(e_df.style.applymap(color_risk, subset=['Risk Level']),
+                                 use_container_width=True, hide_index=True)
+                else:
+                    st.success("No earnings announcements in the next 30 days for tracked symbols.")
+
+                # --- IV Crush Warnings ---
+                try:
+                    iv_warnings = events_module.get_iv_crush_warnings(config.SYMBOLS)
+                    if iv_warnings:
+                        st.subheader("⚡ IV Crush Risk Warnings (Options)")
+                        for w in iv_warnings:
+                            st.warning(w['warning'])
+                except Exception:
+                    pass
+
+                # --- Dividends ---
+                st.subheader("Upcoming Dividend Ex-Dates")
+                dividends = events_data.get('dividends', [])
+                if dividends:
+                    d_rows = []
+                    for ev in dividends:
+                        d_rows.append({
+                            'Symbol': ev['symbol'],
+                            'Ex-Date': ev['date'],
+                            'Days Until': ev['days_until'],
+                            'Annual Dividend': f"${ev.get('dividend_rate', 0):.2f}",
+                            'Yield': f"{ev.get('dividend_yield', 0)*100:.1f}%" if ev.get('dividend_yield') else '—',
+                            'Note': ev.get('risk_note', ''),
+                            'Action': ev.get('action', ''),
+                        })
+                    st.dataframe(pd.DataFrame(d_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No dividend ex-dates in the next 30 days for tracked symbols.")
+
+                last_updated = events_data.get('last_updated', '')
+                if last_updated:
+                    st.caption(f"Last updated: {last_updated[:19]}")
+        else:
+            st.info("Click **'Fetch Events'** to load the earnings and dividend calendar.")

@@ -10,7 +10,18 @@
 # (BTC-USD, ETH-USD), commodities (GC=F gold, CL=F crude oil), and forex
 # (EURUSD=X) all respond differently to macro regimes. Watching them together
 # teaches you how capital flows across asset classes.
-SYMBOLS = ['AAPL', 'MSFT', 'BTC-USD', 'ETH-USD', 'GC=F', 'CL=F', 'EURUSD=X']
+SYMBOLS = [
+    # US Equities
+    'AAPL', 'MSFT',
+    # Crypto
+    'BTC-USD', 'ETH-USD', 'SOL-USD',
+    # Commodities
+    'GC=F', 'CL=F', 'SI=F',
+    # Forex
+    'EURUSD=X', 'GBPUSD=X', 'JPYUSD=X',
+    # European Equities
+    'ASML.AS', 'SAP.DE',
+]
 
 # --- Paper Trading Mode ---
 # WHY: Never connect real capital until the system has proven itself in simulation.
@@ -187,3 +198,26 @@ SENTIMENT_BULLISH_THRESHOLD = 0.3   # avg compound score above this = BUY signal
 # The -0.3 threshold filters to genuinely alarming news clusters, not routine
 # analyst concerns that appear in every stock's news feed daily.
 SENTIMENT_BEARISH_THRESHOLD = -0.3  # avg compound score below this = SELL signal
+
+# --- Market Hours by Asset Class ---
+# WHY: Different assets trade in different time zones. The engine needs to know
+# which symbols are active at any given moment to avoid trading stale prices.
+EQUITY_US_SYMBOLS = ['AAPL', 'MSFT']
+EQUITY_EU_SYMBOLS = ['ASML.AS', 'SAP.DE']   # Amsterdam/Frankfurt — 3am-11:30am ET
+CRYPTO_SYMBOLS = ['BTC-USD', 'ETH-USD', 'SOL-USD']  # 24/7
+COMMODITY_SYMBOLS = ['GC=F', 'CL=F', 'SI=F']  # Futures hours (roughly 6pm-5pm ET Sun-Fri)
+FOREX_SYMBOLS = ['EURUSD=X', 'GBPUSD=X', 'JPYUSD=X']  # 24/5 (closed weekends)
+
+# --- Risk Parity Settings ---
+# WHY RISK PARITY:
+# Traditional position sizing (fixed 5% per trade) ignores the fact that
+# a 5% position in BTC is MUCH riskier than a 5% position in MSFT.
+# BTC has 3-5x the daily volatility of MSFT. Risk parity normalizes this:
+# each position contributes EQUAL RISK to the portfolio, not equal capital.
+# This is how Bridgewater Associates (the world's largest hedge fund) manages
+# their All Weather Portfolio — the most famous risk parity implementation.
+RISK_PARITY_ENABLED = True
+RISK_PARITY_VOL_WINDOW = 20      # Days to calculate volatility for sizing
+RISK_PARITY_TARGET_VOL = 0.01    # Target 1% daily volatility contribution per position
+RISK_PARITY_MIN_SIZE = 0.01      # Minimum 1% of capital (floor)
+RISK_PARITY_MAX_SIZE = 0.10      # Maximum 10% of capital (ceiling)

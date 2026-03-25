@@ -35,6 +35,12 @@ try:
 except ImportError:
     SENTIMENT_AVAILABLE = False
 
+try:
+    import events as events_module
+    EVENTS_AVAILABLE = True
+except ImportError:
+    EVENTS_AVAILABLE = False
+
 # Equity symbols that follow NYSE/NASDAQ market hours
 # Crypto, forex and futures trade around the clock
 EQUITY_SYMBOLS = {'AAPL', 'MSFT'}
@@ -82,6 +88,12 @@ class TradingEngine:
         # minutes is fresh enough to catch breaking news without hammering APIs.
         self.sentiment_cache = {}
         self.SENTIMENT_INTERVAL = 30
+
+        # Events cache — refreshed every 60 ticks (~30 min)
+        # WHY: Earnings dates don't change by the minute. Refreshing every
+        # 30 minutes is more than frequent enough to catch calendar changes.
+        self.events_cache = {}
+        self.EVENTS_INTERVAL = 60
 
         # Current live prices
         self.current_prices = {}
@@ -180,6 +192,13 @@ class TradingEngine:
             except Exception:
                 pass   # Sentiment is optional — never crash the engine over it
 
+        # STEP 4c: Refresh events cache every 60 ticks (~30 min)
+        if EVENTS_AVAILABLE and (self.tick_count % self.EVENTS_INTERVAL == 0 or not self.events_cache):
+            try:
+                self.events_cache = events_module.get_all_events(config.SYMBOLS)
+            except Exception:
+                pass   # Events are optional — never crash the engine over it
+
         # STEP 5: Process each symbol
         for symbol in config.SYMBOLS:
             if symbol not in self.current_prices:
@@ -220,7 +239,11 @@ class TradingEngine:
         Crypto (BTC, ETH), forex (EURUSD) and futures (GC, CL) trade 24/7
         so no time filter is applied to them.
         """
-        if symbol not in EQUITY_SYMBOLS:
+        # European equities: Amsterdam (ASML.AS) and Frankfurt (SAP.DE)
+        # Trade 9am-5:30pm CET = approximately 3am-11:30am ET
+        EU_EQUITY_SYMBOLS = {'ASML.AS', 'SAP.DE'}
+
+        if symbol not in EQUITY_SYMBOLS and symbol not in EU_EQUITY_SYMBOLS:
             return True, 'OK'   # Crypto/forex/futures trade 24/7
 
         now_eastern = datetime.now(EASTERN)
@@ -234,13 +257,21 @@ class TradingEngine:
         minute = now_eastern.minute
         time_as_min = hour * 60 + minute
 
-        open_as_min  = MARKET_OPEN_HOUR  * 60 + MARKET_OPEN_MIN   # 9:45am = 585
-        close_as_min = MARKET_CLOSE_HOUR * 60 + MARKET_CLOSE_MIN  # 3:45pm = 945
+        if symbol in EU_EQUITY_SYMBOLS:
+            # European markets: 3:00am - 11:30am ET
+            eu_open = 3 * 60      # 3:00am ET
+            eu_close = 11 * 60 + 30  # 11:30am ET
+            if time_as_min < eu_open or time_as_min > eu_close:
+                return False, f'European market closed for {symbol}'
 
-        if time_as_min < open_as_min:
-            return False, f'Pre-market — waiting for {MARKET_OPEN_HOUR}:{MARKET_OPEN_MIN:02d}am ET'
-        if time_as_min > close_as_min:
-            return False, 'After-hours — market closed'
+        if symbol in EQUITY_SYMBOLS:
+            open_as_min  = MARKET_OPEN_HOUR  * 60 + MARKET_OPEN_MIN   # 9:45am = 585
+            close_as_min = MARKET_CLOSE_HOUR * 60 + MARKET_CLOSE_MIN  # 3:45pm = 945
+
+            if time_as_min < open_as_min:
+                return False, f'Pre-market — waiting for {MARKET_OPEN_HOUR}:{MARKET_OPEN_MIN:02d}am ET'
+            if time_as_min > close_as_min:
+                return False, 'After-hours — market closed'
 
         return True, 'OK'
 
@@ -386,6 +417,21 @@ class TradingEngine:
         # Map signal to trade direction
         direction = 'LONG' if filtered_signal == 'BUY' else 'SHORT'
 
+        # Apply event filter — block trades into earnings or dividend ex-dates
+        if EVENTS_AVAILABLE and self.events_cache:
+            try:
+                event_blocked, event_reason = events_module.should_block_trade(
+                    symbol, direction, self.events_cache
+                )
+                if event_blocked:
+                    dashboard.add_signal_event(symbol, dominant_strategy, filtered_signal,
+                                                price, regime_name, False, event_reason)
+                    logger_module.log_signal(symbol, dominant_strategy, filtered_signal,
+                                              price, regime_name, False, event_reason, votes)
+                    return
+            except Exception:
+                pass   # Never block on event filter errors
+
         # Check risk limits
         can_open, reason = self.risk.can_open_position(symbol)
         if not can_open:
@@ -401,7 +447,8 @@ class TradingEngine:
             strategy=dominant_strategy,
             regime=regime_name,
             votes=votes,
-            regime_modifier=regime_info.get('position_size_modifier', 1.0)
+            regime_modifier=regime_info.get('position_size_modifier', 1.0),
+            price_history=list(self.price_history.get(symbol, pd.DataFrame())['Close'].values) if symbol in self.price_history else None
         )
 
         if position:
