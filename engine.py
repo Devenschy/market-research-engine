@@ -18,6 +18,7 @@
 import time
 from datetime import datetime
 from collections import defaultdict
+import pytz
 
 import config
 import data as data_module
@@ -27,6 +28,21 @@ from risk import RiskManager
 from broker import PaperBroker
 import logger as logger_module
 import dashboard
+
+try:
+    import sentiment as sentiment_module
+    SENTIMENT_AVAILABLE = True
+except ImportError:
+    SENTIMENT_AVAILABLE = False
+
+# Equity symbols that follow NYSE/NASDAQ market hours
+# Crypto, forex and futures trade around the clock
+EQUITY_SYMBOLS = {'AAPL', 'MSFT'}
+MARKET_OPEN_HOUR = 9     # 9:30 AM Eastern
+MARKET_OPEN_MIN = 45     # Give 15 min buffer after open (most volatile period)
+MARKET_CLOSE_HOUR = 15   # 3:45 PM Eastern (avoid last 15 min volatility)
+MARKET_CLOSE_MIN = 45
+EASTERN = pytz.timezone('US/Eastern')
 
 
 class TradingEngine:
@@ -60,6 +76,12 @@ class TradingEngine:
         self.alt_data = {}
         self.alt_data_tick = 0
         self.ALT_DATA_INTERVAL = 5   # Fetch alt data every 5 ticks
+
+        # Sentiment cache — refreshed every 30 ticks (~15 min)
+        # WHY: News sentiment doesn't change every minute. Fetching every 15
+        # minutes is fresh enough to catch breaking news without hammering APIs.
+        self.sentiment_cache = {}
+        self.SENTIMENT_INTERVAL = 30
 
         # Current live prices
         self.current_prices = {}
@@ -147,6 +169,13 @@ class TradingEngine:
         if self.tick_count % self.ALT_DATA_INTERVAL == 0:
             self.alt_data = data_module.get_alt_data_summary()
 
+        # STEP 4b: Refresh sentiment cache every 30 ticks
+        if SENTIMENT_AVAILABLE and (self.tick_count % self.SENTIMENT_INTERVAL == 0 or not self.sentiment_cache):
+            try:
+                self.sentiment_cache = sentiment_module.analyze_all_symbols_sentiment(config.SYMBOLS)
+            except Exception:
+                pass   # Sentiment is optional — never crash the engine over it
+
         # STEP 5: Process each symbol
         for symbol in config.SYMBOLS:
             if symbol not in self.current_prices:
@@ -169,6 +198,77 @@ class TradingEngine:
             alt_data=self.alt_data,
             tick_count=self.tick_count
         )
+
+    def _is_valid_trading_time(self, symbol: str) -> tuple[bool, str]:
+        """
+        Time filter — block equity trades outside market hours and during
+        the first/last 15 minutes of the session.
+
+        WHY: The open (9:30-9:45am) and close (3:45-4:00pm) are the two most
+        volatile periods of the trading day. Market makers widen spreads,
+        institutional order flow dominates, and retail signals are least
+        reliable. Professional desks call the first 15 minutes the 'amateur
+        hour' — signals that fire here have much lower follow-through.
+
+        Crypto (BTC, ETH), forex (EURUSD) and futures (GC, CL) trade 24/7
+        so no time filter is applied to them.
+        """
+        if symbol not in EQUITY_SYMBOLS:
+            return True, 'OK'   # Crypto/forex/futures trade 24/7
+
+        now_eastern = datetime.now(EASTERN)
+        weekday = now_eastern.weekday()
+
+        # Markets are closed on weekends
+        if weekday >= 5:
+            return False, 'Market closed — weekend'
+
+        hour = now_eastern.hour
+        minute = now_eastern.minute
+        time_as_min = hour * 60 + minute
+
+        open_as_min  = MARKET_OPEN_HOUR  * 60 + MARKET_OPEN_MIN   # 9:45am = 585
+        close_as_min = MARKET_CLOSE_HOUR * 60 + MARKET_CLOSE_MIN  # 3:45pm = 945
+
+        if time_as_min < open_as_min:
+            return False, f'Pre-market — waiting for {MARKET_OPEN_HOUR}:{MARKET_OPEN_MIN:02d}am ET'
+        if time_as_min > close_as_min:
+            return False, 'After-hours — market closed'
+
+        return True, 'OK'
+
+    def _is_sentiment_aligned(self, symbol: str, signal: str) -> tuple[bool, str]:
+        """
+        Sentiment filter — don't trade against strongly negative/positive news.
+
+        WHY: A BUY signal on a stock with strongly bearish news sentiment is a
+        lower-conviction trade. The strategy sees the price pattern, but the news
+        is telling you WHY the price is moving that way — and it may continue.
+        This filter suppresses signals where the technical direction contradicts
+        the news sentiment by a wide margin.
+
+        Only blocks STRONGLY contradicting sentiment (compound < -0.3 or > 0.3).
+        Neutral sentiment never blocks a trade.
+        """
+        try:
+            sentiment_data = self.sentiment_cache.get(symbol)
+            if not sentiment_data:
+                return True, 'OK'   # No sentiment data — don't block
+
+            avg_compound = sentiment_data.get('avg_compound', 0) or 0
+
+            # Block BUY if news is strongly bearish
+            if signal == 'BUY' and avg_compound < config.SENTIMENT_BEARISH_THRESHOLD:
+                return False, f'Sentiment filter: news bearish ({avg_compound:+.2f})'
+
+            # Block SELL if news is strongly bullish
+            if signal == 'SELL' and avg_compound > config.SENTIMENT_BULLISH_THRESHOLD:
+                return False, f'Sentiment filter: news bullish ({avg_compound:+.2f})'
+
+        except Exception:
+            pass   # Never block on sentiment errors
+
+        return True, 'OK'
 
     def _process_symbol(self, symbol: str, price: float):
         """
@@ -259,6 +359,22 @@ class TradingEngine:
         # Check if we already have an open position
         if symbol in self.risk.open_positions:
             return  # One position per symbol — simplifies risk management
+
+        # Apply time filter — block equity trades outside market hours
+        time_ok, time_reason = self._is_valid_trading_time(symbol)
+        if not time_ok:
+            dashboard.add_signal_event(symbol, dominant_strategy, filtered_signal,
+                                        price, regime_name, False, time_reason)
+            return
+
+        # Apply sentiment filter — don't trade against strongly contradicting news
+        sentiment_ok, sentiment_reason = self._is_sentiment_aligned(symbol, filtered_signal)
+        if not sentiment_ok:
+            dashboard.add_signal_event(symbol, dominant_strategy, filtered_signal,
+                                        price, regime_name, False, sentiment_reason)
+            logger_module.log_signal(symbol, dominant_strategy, filtered_signal,
+                                      price, regime_name, False, sentiment_reason, votes)
+            return
 
         # Map signal to trade direction
         direction = 'LONG' if filtered_signal == 'BUY' else 'SHORT'
