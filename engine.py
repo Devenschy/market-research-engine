@@ -100,6 +100,10 @@ class TradingEngine:
 
         This is analogous to how a quant fund backtests before going live.
         """
+        # Restore portfolio state from last run — preserves capital + open positions
+        # across restarts, deployments and bug fixes
+        self.risk.load_state()
+
         print("[engine] Warming up strategies with historical data...")
 
         for symbol in config.SYMBOLS:
@@ -184,7 +188,10 @@ class TradingEngine:
             price = self.current_prices[symbol]
             self._process_symbol(symbol, price)
 
-        # STEP 6: Update performance log every 10 ticks
+        # STEP 6: Save portfolio state every tick so restarts never lose progress
+        self.risk.save_state()
+
+        # STEP 6b: Update performance log every 10 ticks
         if self.tick_count % 10 == 0:
             logger_module.update_performance(self.risk)
 

@@ -7,9 +7,14 @@
 # This module enforces three non-negotiable rules on every trade.
 
 import config
+import json
+import os
 from datetime import datetime, date
 from dataclasses import dataclass, field
 from typing import Optional
+from pathlib import Path
+
+STATE_FILE = 'logs/portfolio_state.json'
 
 
 @dataclass
@@ -347,3 +352,110 @@ class RiskManager:
                 (self.day_start_equity - self.equity) / self.day_start_equity * 100, 2
             ) if self.day_start_equity > 0 else 0
         }
+
+    def save_state(self):
+        """
+        Persist the full portfolio state to disk after every tick.
+
+        WHY: Without persistence, every restart (bug fix, deployment, crash)
+        resets the portfolio to $10,000 with no positions. This makes it
+        impossible to track long-term performance or maintain open positions
+        across restarts. With persistence, the engine picks up exactly where
+        it left off — capital, open positions, P&L history all intact.
+
+        We save to JSON (human-readable) so you can inspect the state file
+        directly if you ever need to debug or manually adjust a position.
+        """
+        Path('logs').mkdir(exist_ok=True)
+        try:
+            # Serialize open positions (dataclasses aren't JSON-serializable by default)
+            positions_data = {}
+            for symbol, pos in self.open_positions.items():
+                positions_data[symbol] = {
+                    'symbol': pos.symbol,
+                    'entry_price': pos.entry_price,
+                    'quantity': pos.quantity,
+                    'stop_loss': pos.stop_loss,
+                    'take_profit': pos.take_profit,
+                    'direction': pos.direction,
+                    'strategy': pos.strategy,
+                    'regime': pos.regime,
+                    'entry_time': pos.entry_time.isoformat(),
+                    'votes': pos.votes,
+                }
+
+            state = {
+                'capital': self.capital,
+                'equity': self.equity,
+                'realized_pnl': self.realized_pnl,
+                'total_trades': self.total_trades,
+                'winning_trades': self.winning_trades,
+                'losing_trades': self.losing_trades,
+                'day_start_equity': self.day_start_equity,
+                'current_date': self.current_date.isoformat(),
+                'trading_halted': self.trading_halted,
+                'open_positions': positions_data,
+                'last_saved': datetime.now().isoformat(),
+            }
+
+            with open(STATE_FILE, 'w') as f:
+                json.dump(state, f, indent=2)
+
+        except Exception as e:
+            print(f"[risk] Warning: could not save state: {e}")
+
+    def load_state(self) -> bool:
+        """
+        Restore portfolio state from the last save file on startup.
+
+        WHY: This is called once when the engine initializes. If a state file
+        exists from a previous run, we restore everything — capital, open
+        positions, trade counts — so the engine continues seamlessly.
+        If no state file exists (first ever run), we start fresh from
+        STARTING_CAPITAL with no positions. Either way, the engine is ready.
+
+        Returns True if state was loaded, False if starting fresh.
+        """
+        if not os.path.exists(STATE_FILE):
+            print("[risk] No saved state found — starting fresh.")
+            return False
+
+        try:
+            with open(STATE_FILE) as f:
+                state = json.load(f)
+
+            self.capital = state['capital']
+            self.equity = state['equity']
+            self.realized_pnl = state['realized_pnl']
+            self.total_trades = state['total_trades']
+            self.winning_trades = state['winning_trades']
+            self.losing_trades = state['losing_trades']
+            self.day_start_equity = state['day_start_equity']
+            self.current_date = date.fromisoformat(state['current_date'])
+            self.trading_halted = state['trading_halted']
+
+            # Restore open positions as Position dataclass objects
+            for symbol, pos_data in state.get('open_positions', {}).items():
+                self.open_positions[symbol] = Position(
+                    symbol=pos_data['symbol'],
+                    entry_price=pos_data['entry_price'],
+                    quantity=pos_data['quantity'],
+                    stop_loss=pos_data['stop_loss'],
+                    take_profit=pos_data['take_profit'],
+                    direction=pos_data['direction'],
+                    strategy=pos_data['strategy'],
+                    regime=pos_data['regime'],
+                    entry_time=datetime.fromisoformat(pos_data['entry_time']),
+                    votes=pos_data.get('votes', {}),
+                )
+
+            last_saved = state.get('last_saved', 'unknown')
+            print(f"[risk] State restored from {last_saved}")
+            print(f"[risk] Capital: ${self.capital:,.2f} | "
+                  f"Open positions: {len(self.open_positions)} | "
+                  f"Realized P&L: ${self.realized_pnl:+,.2f}")
+            return True
+
+        except Exception as e:
+            print(f"[risk] Warning: could not load state ({e}) — starting fresh.")
+            return False

@@ -1,5 +1,6 @@
 logs/*.csv
-logs/*.json
+logs/performance.json
+# portfolio_state.json is intentionally NOT ignored — it persists positions across deploys
 __pycache__/
 *.pyc
 .env

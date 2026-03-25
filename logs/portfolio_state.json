@@ -1,0 +1,13 @@
+{
+  "capital": 10000.0,
+  "equity": 10000.0,
+  "realized_pnl": 0.0,
+  "total_trades": 0,
+  "winning_trades": 0,
+  "losing_trades": 0,
+  "day_start_equity": 10000.0,
+  "current_date": "2026-03-25",
+  "trading_halted": false,
+  "open_positions": {},
+  "last_saved": "2026-03-25T17:56:40.855530"
+}
