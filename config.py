@@ -11,17 +11,51 @@
 # (EURUSD=X) all respond differently to macro regimes. Watching them together
 # teaches you how capital flows across asset classes.
 SYMBOLS = [
-    # US Equities — Tech
-    'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN',
-    # US Equities — Finance & Other Sectors
-    'JPM', 'V', 'JNJ', 'XOM',
-    # Crypto
+    # =========================================================================
+    # TOP 50 S&P 500 BY MARKET CAP
+    # These 50 stocks represent ~60% of the entire S&P 500's market value.
+    # Tracking all 500 is impractical for a polling system (warmup alone
+    # would take 10+ min, each tick would take several minutes).
+    # The top 50 gives maximum coverage with manageable compute.
+    # =========================================================================
+
+    # Mega-cap Tech / Growth
+    'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'TSLA', 'AVGO',
+    # Semiconductor / Hardware
+    'AMD', 'QCOM', 'TXN', 'AMAT', 'ORCL',
+    # Healthcare / Pharma / Biotech
+    'LLY', 'UNH', 'JNJ', 'ABBV', 'MRK', 'TMO', 'ABT', 'ISRG', 'AMGN', 'DHR',
+    # Finance / Payments
+    'JPM', 'V', 'MA', 'BAC', 'GS', 'SPGI',
+    # Consumer Staples / Retail
+    'WMT', 'COST', 'PG', 'KO', 'PEP', 'HD',
+    # Industrials / Aerospace / Energy
+    'GE', 'RTX', 'XOM', 'CVX', 'NEE', 'LIN',
+    # Software / Services
+    'CRM', 'ACN', 'NOW', 'INTU',
+    # Telecom / Media
+    'VZ', 'NFLX', 'DIS',
+
+    # =========================================================================
+    # CRYPTO (24/7)
+    # =========================================================================
     'BTC-USD', 'ETH-USD', 'SOL-USD',
-    # Commodities
-    'GC=F', 'CL=F', 'SI=F',
-    # Forex
+
+    # =========================================================================
+    # COMMODITIES (near-24/5)
+    # =========================================================================
+    'GC=F',   # Gold
+    'CL=F',   # Crude Oil
+    'SI=F',   # Silver
+
+    # =========================================================================
+    # FOREX (24/5)
+    # =========================================================================
     'EURUSD=X', 'GBPUSD=X', 'JPYUSD=X',
-    # European Equities
+
+    # =========================================================================
+    # EUROPEAN EQUITIES (3am–11:30am ET)
+    # =========================================================================
     'ASML.AS', 'SAP.DE',
 ]
 
@@ -50,12 +84,12 @@ TAKE_PROFIT_PCT = 0.04     # 4% target gain per trade
 # The discipline to stop is a psychological skill, not just a technical one.
 MAX_DAILY_DRAWDOWN_PCT = 0.05   # 5% daily drawdown halts all trading
 
-MAX_OPEN_POSITIONS = 8
+MAX_OPEN_POSITIONS = 15
 
 # --- Polling Interval ---
 # WHY: 60 seconds is sufficient for a learning/research system. We are not
 # competing on latency — we are learning market structure.
-POLL_INTERVAL_SECONDS = 30
+POLL_INTERVAL_SECONDS = 60
 
 # --- Strategy Parameters ---
 # WHY: Fast MA (10) vs Slow MA (30) gives a responsive but not noisy crossover.
@@ -204,7 +238,16 @@ SENTIMENT_BEARISH_THRESHOLD = -0.3  # avg compound score below this = SELL signa
 # --- Market Hours by Asset Class ---
 # WHY: Different assets trade in different time zones. The engine needs to know
 # which symbols are active at any given moment to avoid trading stale prices.
-EQUITY_US_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'JPM', 'V', 'JNJ', 'XOM']
+EQUITY_US_SYMBOLS = [
+    'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'TSLA', 'AVGO',
+    'AMD', 'QCOM', 'TXN', 'AMAT', 'ORCL',
+    'LLY', 'UNH', 'JNJ', 'ABBV', 'MRK', 'TMO', 'ABT', 'ISRG', 'AMGN', 'DHR',
+    'JPM', 'V', 'MA', 'BAC', 'GS', 'SPGI',
+    'WMT', 'COST', 'PG', 'KO', 'PEP', 'HD',
+    'GE', 'RTX', 'XOM', 'CVX', 'NEE', 'LIN',
+    'CRM', 'ACN', 'NOW', 'INTU',
+    'VZ', 'NFLX', 'DIS',
+]
 EQUITY_EU_SYMBOLS = ['ASML.AS', 'SAP.DE']   # Amsterdam/Frankfurt — 3am-11:30am ET
 CRYPTO_SYMBOLS = ['BTC-USD', 'ETH-USD', 'SOL-USD']  # 24/7
 COMMODITY_SYMBOLS = ['GC=F', 'CL=F', 'SI=F']  # Futures hours (roughly 6pm-5pm ET Sun-Fri)
