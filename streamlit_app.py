@@ -78,15 +78,14 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Auto-refresh every 60 seconds
-st.markdown(
-    '<meta http-equiv="refresh" content="60">',
-    unsafe_allow_html=True
-)
-
 # --- Header ---
 st.title("📈 Market Research Engine")
-st.caption(f"Dezona Group — Paper Trading | Last refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+col_hdr, col_refresh = st.columns([5, 1])
+with col_hdr:
+    st.caption(f"Dezona Group — Paper Trading | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+with col_refresh:
+    if st.button("🔄 Refresh", help="Reload latest data"):
+        st.rerun()
 st.divider()
 
 
@@ -1198,19 +1197,22 @@ with edgar_tab:
     else:
         # Auto-load EDGAR data once per session — avoids tab-reset bug from button clicks
         # Data is cached in session_state so it only fetches once, not on every rerun
+        # EDGAR only applies to US equities — filter out crypto/forex/futures
+        # Also cap at 20 symbols to respect SEC rate limits (4 req/sec)
+        edgar_symbols = [s for s in config.EQUITY_US_SYMBOLS[:20]]
+
         if 'edgar_data' not in st.session_state:
-            with st.spinner("Loading SEC filings... (30-60 seconds, respecting SEC rate limits)"):
+            with st.spinner(f"Loading SEC filings for {len(edgar_symbols)} equities... (30-60 seconds)"):
                 try:
-                    st.session_state['edgar_data'] = edgar_module.get_all_edgar_data(config.SYMBOLS)
+                    st.session_state['edgar_data'] = edgar_module.get_all_edgar_data(edgar_symbols)
                 except Exception as e:
                     st.error(f"EDGAR fetch error: {e}")
                     st.session_state['edgar_data'] = None
 
-        # Manual refresh button — uses a key so it doesn't reset tabs
-        if st.button("Refresh EDGAR Data", key="edgar_refresh"):
+        if st.button("🔄 Refresh EDGAR Data", key="edgar_refresh"):
             with st.spinner("Refreshing SEC filings..."):
                 try:
-                    st.session_state['edgar_data'] = edgar_module.get_all_edgar_data(config.SYMBOLS)
+                    st.session_state['edgar_data'] = edgar_module.get_all_edgar_data(edgar_symbols)
                 except Exception as e:
                     st.error(f"EDGAR fetch error: {e}")
 
@@ -1492,7 +1494,7 @@ Momentum and Low Vol apply to all asset classes including crypto and forex.
 
                     st.info(f"**Composite reasoning:** {sym_data.get('composite_reason', '—')}")
         else:
-            st.info("Click **'Run Factor Analysis'** above to score all 13 symbols. Takes ~45 seconds (fetches data from Yahoo Finance for each symbol).")
+            st.info(f"Click **'Run Factor Analysis'** above to score all {len(factor_symbols)} symbols. Takes ~60-90 seconds (fetches data from Yahoo Finance for each symbol).")
             st.markdown("**Symbols that will be analyzed:**")
             sym_df = pd.DataFrame([
                 {'Symbol': s,
@@ -1541,11 +1543,14 @@ with events_tab:
         with col_e1:
             fetch_events = st.button("🔄 Refresh Events", type="primary")
 
+        # Earnings/dividends only exist for equities — filter out crypto/forex/futures
+        events_symbols = config.EQUITY_US_SYMBOLS + config.EQUITY_EU_SYMBOLS
+
         # Auto-load on first visit; refresh button forces a re-fetch
         if 'events_data' not in st.session_state or fetch_events:
-            with st.spinner("Fetching earnings and dividend calendars..."):
+            with st.spinner(f"Fetching earnings and dividend calendars for {len(events_symbols)} equities..."):
                 try:
-                    st.session_state['events_data'] = events_module.get_all_events(config.SYMBOLS)
+                    st.session_state['events_data'] = events_module.get_all_events(events_symbols)
                 except Exception as e:
                     st.error(f"Events fetch error: {e}")
 
