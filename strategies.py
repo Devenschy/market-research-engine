@@ -312,9 +312,9 @@ class StrategyEnsemble:
         buy_votes = sum(1 for v in votes.values() if v == 'BUY')
         sell_votes = sum(1 for v in votes.values() if v == 'SELL')
 
-        if buy_votes >= 1:
+        if buy_votes >= 2:
             return 'BUY'
-        if sell_votes >= 1:
+        if sell_votes >= 2:
             return 'SELL'
         return None
 

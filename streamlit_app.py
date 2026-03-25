@@ -1134,21 +1134,25 @@ with edgar_tab:
     if not EDGAR_AVAILABLE:
         st.error("edgar.py failed to import.")
     else:
-        edgar_sym1, edgar_sym2 = st.columns([1, 3])
-        refresh_edgar = edgar_sym1.button("Fetch EDGAR Data", type="primary")
-
-        st.caption("⚠️ EDGAR data takes 30-60 seconds to fetch. Click button above to load.")
-
-        if refresh_edgar:
-            with st.spinner("Fetching SEC filings... (respecting SEC rate limits)"):
+        # Auto-load EDGAR data once per session — avoids tab-reset bug from button clicks
+        # Data is cached in session_state so it only fetches once, not on every rerun
+        if 'edgar_data' not in st.session_state:
+            with st.spinner("Loading SEC filings... (30-60 seconds, respecting SEC rate limits)"):
                 try:
-                    edgar_data = edgar_module.get_all_edgar_data(config.SYMBOLS)
-                    st.session_state['edgar_data'] = edgar_data
+                    st.session_state['edgar_data'] = edgar_module.get_all_edgar_data(config.SYMBOLS)
                 except Exception as e:
                     st.error(f"EDGAR fetch error: {e}")
-                    edgar_data = None
-        else:
-            edgar_data = st.session_state.get('edgar_data', None)
+                    st.session_state['edgar_data'] = None
+
+        # Manual refresh button — uses a key so it doesn't reset tabs
+        if st.button("Refresh EDGAR Data", key="edgar_refresh"):
+            with st.spinner("Refreshing SEC filings..."):
+                try:
+                    st.session_state['edgar_data'] = edgar_module.get_all_edgar_data(config.SYMBOLS)
+                except Exception as e:
+                    st.error(f"EDGAR fetch error: {e}")
+
+        edgar_data = st.session_state.get('edgar_data', None)
 
         if edgar_data:
             # --- 8-K Filings ---
