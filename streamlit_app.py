@@ -1215,10 +1215,12 @@ with edgar_tab:
                     st.session_state['edgar_data'] = edgar_module.get_all_edgar_data(edgar_symbols)
                 except Exception as e:
                     st.error(f"EDGAR fetch error: {e}")
+                    # Always set the key so the page renders even on failure
+                    st.session_state['edgar_data'] = {'filings_8k': {}, 'insider_transactions': {}, 'insider_sentiment': {}, 'berkshire_holdings': [], 'error': str(e)}
 
-        edgar_data = st.session_state.get('edgar_data', None)
+        edgar_data = st.session_state.get('edgar_data', {})
 
-        if edgar_data:
+        if edgar_data is not None:
             # --- 8-K Filings ---
             st.subheader("Recent 8-K Filings — Material Events")
             st.caption("8-K = current report. Filed within 4 business days of any material event (earnings, lawsuits, CEO changes, mergers).")
@@ -1379,6 +1381,7 @@ Momentum and Low Vol apply to all asset classes including crypto and forex.
                         st.session_state['factor_ranking'] = factors_module.rank_symbols_by_factor(
                             factor_symbols, factor=rank_by
                         )
+                        st.rerun()  # force re-render so results display immediately
                     except Exception as e:
                         st.error(f"Factor analysis error: {e}")
 
@@ -1553,75 +1556,76 @@ with events_tab:
                     st.session_state['events_data'] = events_module.get_all_events(events_symbols)
                 except Exception as e:
                     st.error(f"Events fetch error: {e}")
+                    # Always set the key so the content block renders even on failure
+                    st.session_state['events_data'] = {'earnings': {}, 'dividends': {}, 'high_risk_symbols': [], 'error': str(e)}
 
-        if 'events_data' in st.session_state:
-            events_data = st.session_state.get('events_data', {})
-            if events_data:
-                high_risk = events_data.get('high_risk_symbols', [])
-                if high_risk:
-                    st.warning(f"⚠️ High-risk event symbols (next 5 days): **{', '.join(high_risk)}** — engine will block new trades.")
+        events_data = st.session_state.get('events_data', {})
+        if events_data.get('error'):
+            st.error(f"Could not load events data: {events_data['error']}")
+            st.info("This usually means Yahoo Finance blocked the request. Try clicking Refresh in a few seconds.")
+        high_risk = events_data.get('high_risk_symbols', [])
+        if high_risk:
+            st.warning(f"⚠️ High-risk event symbols (next 5 days): **{', '.join(high_risk)}** — engine will block new trades.")
 
-                # --- Earnings ---
-                # events_data['earnings'] = {symbol: {next_earnings, days_until_earnings, earnings_risk, ...}}
-                st.subheader("Upcoming Earnings Announcements")
-                earnings_dict = events_data.get('earnings', {})
-                earnings_with_dates = [v for v in earnings_dict.values()
-                                       if v.get('next_earnings') is not None]
-                if earnings_with_dates:
-                    e_rows = []
-                    for ev in sorted(earnings_with_dates, key=lambda x: x.get('days_until_earnings', 999)):
-                        e_rows.append({
-                            'Symbol': ev['symbol'],
-                            'Date': ev.get('next_earnings', '—'),
-                            'Days Until': ev.get('days_until_earnings', '—'),
-                            'Risk Level': ev.get('earnings_risk', '—'),
-                            'Recommendation': ev.get('recommendation', '')[:80],
-                        })
-                    e_df = pd.DataFrame(e_rows)
+        # --- Earnings ---
+        st.subheader("Upcoming Earnings Announcements")
+        earnings_dict = events_data.get('earnings', {})
+        earnings_with_dates = [v for v in earnings_dict.values()
+                               if v.get('next_earnings') is not None]
+        if earnings_with_dates:
+            e_rows = []
+            for ev in sorted(earnings_with_dates, key=lambda x: x.get('days_until_earnings', 999)):
+                e_rows.append({
+                    'Symbol': ev['symbol'],
+                    'Date': ev.get('next_earnings', '—'),
+                    'Days Until': ev.get('days_until_earnings', '—'),
+                    'Risk Level': ev.get('earnings_risk', '—'),
+                    'Recommendation': ev.get('recommendation', '')[:80],
+                })
+            e_df = pd.DataFrame(e_rows)
 
-                    def color_risk(val):
-                        if val == 'HIGH':
-                            return 'background-color: #5c0000; color: #ff4444; font-weight: bold'
-                        elif val == 'MEDIUM':
-                            return 'background-color: #3d1a00; color: #ff8800'
-                        elif val == 'LOW':
-                            return 'background-color: #3d3d00; color: #ffff44'
-                        return ''
+            def color_risk(val):
+                if val == 'HIGH':
+                    return 'background-color: #5c0000; color: #ff4444; font-weight: bold'
+                elif val == 'MEDIUM':
+                    return 'background-color: #3d1a00; color: #ff8800'
+                elif val == 'LOW':
+                    return 'background-color: #3d3d00; color: #ffff44'
+                return ''
 
-                    st.dataframe(e_df.style.applymap(color_risk, subset=['Risk Level']),
-                                 use_container_width=True, hide_index=True)
-                else:
-                    st.success("No upcoming earnings found for tracked symbols (or none scheduled in yfinance).")
+            st.dataframe(e_df.style.applymap(color_risk, subset=['Risk Level']),
+                         use_container_width=True, hide_index=True)
+        else:
+            st.info("No upcoming earnings found for tracked equity symbols.")
 
-                # --- IV Crush Warnings ---
-                try:
-                    iv_warnings = events_module.get_iv_crush_warnings(config.SYMBOLS)
-                    if iv_warnings:
-                        st.subheader("⚡ IV Crush Risk Warnings (Options)")
-                        for w in iv_warnings:
-                            st.warning(w['warning'])
-                except Exception:
-                    pass
+        # --- IV Crush Warnings ---
+        try:
+            iv_warnings = events_module.get_iv_crush_warnings(events_symbols)
+            if iv_warnings:
+                st.subheader("⚡ IV Crush Risk Warnings (Options)")
+                for w in iv_warnings:
+                    st.warning(w['warning'])
+        except Exception:
+            pass
 
-                # --- Dividends ---
-                # events_data['dividends'] = {symbol: {next_ex_dividend, dividend_amount, days_until_ex_div}}
-                st.subheader("Upcoming Dividend Ex-Dates")
-                dividends_dict = events_data.get('dividends', {})
-                divs_with_dates = [v for v in dividends_dict.values()
-                                   if v.get('next_ex_dividend') is not None]
-                if divs_with_dates:
-                    d_rows = []
-                    for ev in sorted(divs_with_dates, key=lambda x: x.get('days_until_ex_div', 999)):
-                        d_rows.append({
-                            'Symbol': ev['symbol'],
-                            'Ex-Date': ev.get('next_ex_dividend', '—'),
-                            'Days Until': ev.get('days_until_ex_div', '—'),
-                            'Quarterly Dividend': f"${ev.get('dividend_amount', 0):.4f}" if ev.get('dividend_amount') else '—',
-                        })
-                    st.dataframe(pd.DataFrame(d_rows), use_container_width=True, hide_index=True)
-                else:
-                    st.info("No upcoming dividend ex-dates found for tracked symbols.")
+        # --- Dividends ---
+        st.subheader("Upcoming Dividend Ex-Dates")
+        dividends_dict = events_data.get('dividends', {})
+        divs_with_dates = [v for v in dividends_dict.values()
+                           if v.get('next_ex_dividend') is not None]
+        if divs_with_dates:
+            d_rows = []
+            for ev in sorted(divs_with_dates, key=lambda x: x.get('days_until_ex_div', 999)):
+                d_rows.append({
+                    'Symbol': ev['symbol'],
+                    'Ex-Date': ev.get('next_ex_dividend', '—'),
+                    'Days Until': ev.get('days_until_ex_div', '—'),
+                    'Quarterly Dividend': f"${ev.get('dividend_amount', 0):.4f}" if ev.get('dividend_amount') else '—',
+                })
+            st.dataframe(pd.DataFrame(d_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("No upcoming dividend ex-dates found for tracked equity symbols.")
 
-                last_updated = events_data.get('last_updated', '')
-                if last_updated:
-                    st.caption(f"Last updated: {last_updated[:19]}")
+        last_updated = events_data.get('last_updated', '')
+        if last_updated:
+            st.caption(f"Last updated: {last_updated[:19]}")
