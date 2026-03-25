@@ -11,8 +11,10 @@
 # (EURUSD=X) all respond differently to macro regimes. Watching them together
 # teaches you how capital flows across asset classes.
 SYMBOLS = [
-    # US Equities
-    'AAPL', 'MSFT',
+    # US Equities — Tech
+    'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN',
+    # US Equities — Finance & Other Sectors
+    'JPM', 'V', 'JNJ', 'XOM',
     # Crypto
     'BTC-USD', 'ETH-USD', 'SOL-USD',
     # Commodities
@@ -48,7 +50,7 @@ TAKE_PROFIT_PCT = 0.04     # 4% target gain per trade
 # The discipline to stop is a psychological skill, not just a technical one.
 MAX_DAILY_DRAWDOWN_PCT = 0.05   # 5% daily drawdown halts all trading
 
-MAX_OPEN_POSITIONS = 5
+MAX_OPEN_POSITIONS = 8
 
 # --- Polling Interval ---
 # WHY: 60 seconds is sufficient for a learning/research system. We are not
@@ -202,7 +204,7 @@ SENTIMENT_BEARISH_THRESHOLD = -0.3  # avg compound score below this = SELL signa
 # --- Market Hours by Asset Class ---
 # WHY: Different assets trade in different time zones. The engine needs to know
 # which symbols are active at any given moment to avoid trading stale prices.
-EQUITY_US_SYMBOLS = ['AAPL', 'MSFT']
+EQUITY_US_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'JPM', 'V', 'JNJ', 'XOM']
 EQUITY_EU_SYMBOLS = ['ASML.AS', 'SAP.DE']   # Amsterdam/Frankfurt — 3am-11:30am ET
 CRYPTO_SYMBOLS = ['BTC-USD', 'ETH-USD', 'SOL-USD']  # 24/7
 COMMODITY_SYMBOLS = ['GC=F', 'CL=F', 'SI=F']  # Futures hours (roughly 6pm-5pm ET Sun-Fri)
