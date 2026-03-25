@@ -421,7 +421,7 @@ class TradingEngine:
         if EVENTS_AVAILABLE and self.events_cache:
             try:
                 event_blocked, event_reason = events_module.should_block_trade(
-                    symbol, direction, self.events_cache
+                    symbol, filtered_signal, self.events_cache
                 )
                 if event_blocked:
                     dashboard.add_signal_event(symbol, dominant_strategy, filtered_signal,

@@ -1497,34 +1497,36 @@ with events_tab:
                     st.warning(f"⚠️ High-risk event symbols (next 5 days): **{', '.join(high_risk)}** — engine will block new trades.")
 
                 # --- Earnings ---
+                # events_data['earnings'] = {symbol: {next_earnings, days_until_earnings, earnings_risk, ...}}
                 st.subheader("Upcoming Earnings Announcements")
-                earnings = events_data.get('earnings', [])
-                if earnings:
+                earnings_dict = events_data.get('earnings', {})
+                earnings_with_dates = [v for v in earnings_dict.values()
+                                       if v.get('next_earnings') is not None]
+                if earnings_with_dates:
                     e_rows = []
-                    for ev in earnings:
+                    for ev in sorted(earnings_with_dates, key=lambda x: x.get('days_until_earnings', 999)):
                         e_rows.append({
                             'Symbol': ev['symbol'],
-                            'Date': ev['date'],
-                            'Days Until': ev['days_until'],
-                            'Risk Level': ev['risk_level'],
-                            'Action': ev['action'],
-                            'Est. EPS': ev.get('estimated_eps', '—'),
+                            'Date': ev.get('next_earnings', '—'),
+                            'Days Until': ev.get('days_until_earnings', '—'),
+                            'Risk Level': ev.get('earnings_risk', '—'),
+                            'Recommendation': ev.get('recommendation', '')[:80],
                         })
                     e_df = pd.DataFrame(e_rows)
 
                     def color_risk(val):
-                        if val == 'CRITICAL':
+                        if val == 'HIGH':
                             return 'background-color: #5c0000; color: #ff4444; font-weight: bold'
-                        elif val == 'HIGH':
-                            return 'background-color: #3d1a00; color: #ff8800'
                         elif val == 'MEDIUM':
+                            return 'background-color: #3d1a00; color: #ff8800'
+                        elif val == 'LOW':
                             return 'background-color: #3d3d00; color: #ffff44'
                         return ''
 
                     st.dataframe(e_df.style.applymap(color_risk, subset=['Risk Level']),
                                  use_container_width=True, hide_index=True)
                 else:
-                    st.success("No earnings announcements in the next 30 days for tracked symbols.")
+                    st.success("No upcoming earnings found for tracked symbols (or none scheduled in yfinance).")
 
                 # --- IV Crush Warnings ---
                 try:
@@ -1537,23 +1539,23 @@ with events_tab:
                     pass
 
                 # --- Dividends ---
+                # events_data['dividends'] = {symbol: {next_ex_dividend, dividend_amount, days_until_ex_div}}
                 st.subheader("Upcoming Dividend Ex-Dates")
-                dividends = events_data.get('dividends', [])
-                if dividends:
+                dividends_dict = events_data.get('dividends', {})
+                divs_with_dates = [v for v in dividends_dict.values()
+                                   if v.get('next_ex_dividend') is not None]
+                if divs_with_dates:
                     d_rows = []
-                    for ev in dividends:
+                    for ev in sorted(divs_with_dates, key=lambda x: x.get('days_until_ex_div', 999)):
                         d_rows.append({
                             'Symbol': ev['symbol'],
-                            'Ex-Date': ev['date'],
-                            'Days Until': ev['days_until'],
-                            'Annual Dividend': f"${ev.get('dividend_rate', 0):.2f}",
-                            'Yield': f"{ev.get('dividend_yield', 0)*100:.1f}%" if ev.get('dividend_yield') else '—',
-                            'Note': ev.get('risk_note', ''),
-                            'Action': ev.get('action', ''),
+                            'Ex-Date': ev.get('next_ex_dividend', '—'),
+                            'Days Until': ev.get('days_until_ex_div', '—'),
+                            'Quarterly Dividend': f"${ev.get('dividend_amount', 0):.4f}" if ev.get('dividend_amount') else '—',
                         })
                     st.dataframe(pd.DataFrame(d_rows), use_container_width=True, hide_index=True)
                 else:
-                    st.info("No dividend ex-dates in the next 30 days for tracked symbols.")
+                    st.info("No upcoming dividend ex-dates found for tracked symbols.")
 
                 last_updated = events_data.get('last_updated', '')
                 if last_updated:
