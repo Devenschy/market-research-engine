@@ -200,19 +200,63 @@ with main_tab:
 
     st.divider()
 
-    # --- Row 2: Live Prices ---
+    # --- Row 2: Live Prices Ticker ---
     st.subheader("Live Prices")
 
     with st.spinner("Fetching live prices..."):
         live_prices = fetch_live_prices()
 
-    price_cols = st.columns(len(config.SYMBOLS))
-    for i, symbol in enumerate(config.SYMBOLS):
+    # Build ticker items — show all symbols in a scrolling marquee
+    ticker_items = []
+    for symbol in config.SYMBOLS:
         price = live_prices.get(symbol)
-        price_cols[i].metric(
-            label=symbol,
-            value=f"{price:,.4f}" if price else "—"
-        )
+        if price:
+            ticker_items.append(f"<span class='tick-sym'>{symbol}</span><span class='tick-price'>${price:,.4f}</span>")
+        else:
+            ticker_items.append(f"<span class='tick-sym'>{symbol}</span><span class='tick-price'>—</span>")
+
+    # Duplicate the list so the scroll loops seamlessly
+    ticker_html = "  &nbsp;&nbsp;•&nbsp;&nbsp;  ".join(ticker_items * 2)
+
+    st.markdown(f"""
+<style>
+.ticker-wrap {{
+    width: 100%;
+    overflow: hidden;
+    background: #0e1117;
+    border: 1px solid #2d2d2d;
+    border-radius: 6px;
+    padding: 10px 0;
+    margin-bottom: 8px;
+}}
+.ticker-move {{
+    display: inline-block;
+    white-space: nowrap;
+    animation: ticker-scroll 120s linear infinite;
+}}
+.ticker-move:hover {{
+    animation-play-state: paused;
+}}
+@keyframes ticker-scroll {{
+    0%   {{ transform: translateX(0); }}
+    100% {{ transform: translateX(-50%); }}
+}}
+.tick-sym {{
+    color: #aaaaaa;
+    font-size: 13px;
+    font-weight: 600;
+    margin-right: 4px;
+}}
+.tick-price {{
+    color: #00ff88;
+    font-size: 13px;
+    margin-right: 16px;
+}}
+</style>
+<div class="ticker-wrap">
+  <div class="ticker-move">{ticker_html}</div>
+</div>
+""", unsafe_allow_html=True)
 
     st.divider()
 
