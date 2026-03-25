@@ -57,14 +57,18 @@ except ImportError as e:
 try:
     import factors as factors_module
     FACTORS_AVAILABLE = True
-except ImportError:
+    FACTORS_IMPORT_ERROR = None
+except Exception as e:
     FACTORS_AVAILABLE = False
+    FACTORS_IMPORT_ERROR = str(e)
 
 try:
     import events as events_module
     EVENTS_AVAILABLE = True
-except ImportError:
+    EVENTS_IMPORT_ERROR = None
+except Exception as e:
     EVENTS_AVAILABLE = False
+    EVENTS_IMPORT_ERROR = str(e)
 
 
 st.set_page_config(
@@ -1286,7 +1290,8 @@ with factors_tab:
     )
 
     if not FACTORS_AVAILABLE:
-        st.error("factors.py module not found.")
+        err = FACTORS_IMPORT_ERROR or "factors.py not found"
+        st.error(f"Factor Investing unavailable: {err}")
     else:
         # Factor explainer
         with st.expander("What is Factor Investing? (Click to learn)"):
@@ -1443,7 +1448,17 @@ Momentum and Low Vol apply to all asset classes including crypto and forex.
 
                     st.info(f"**Composite reasoning:** {sym_data.get('composite_reason', '—')}")
         else:
-            st.info("Click **'Run Factor Analysis'** to score all symbols across the four research-backed factors.")
+            st.info("Click **'Run Factor Analysis'** above to score all 13 symbols. Takes ~45 seconds (fetches data from Yahoo Finance for each symbol).")
+            st.markdown("**Symbols that will be analyzed:**")
+            sym_df = pd.DataFrame([
+                {'Symbol': s,
+                 'Asset Class': ('Equity' if not any(s.endswith(x) for x in ['-USD','-USDT','=X','=F']) else
+                                 'Crypto' if s.endswith('-USD') else
+                                 'Forex' if s.endswith('=X') else 'Futures/Commodity'),
+                 'Factors': ('All 4' if not any(s.endswith(x) for x in ['-USD','-USDT','=X','=F']) else 'Momentum + Low Vol')}
+                for s in factor_symbols
+            ])
+            st.dataframe(sym_df, use_container_width=True, hide_index=True)
 
 
 # =============================================================================
@@ -1458,7 +1473,8 @@ with events_tab:
     )
 
     if not EVENTS_AVAILABLE:
-        st.error("events.py module not found.")
+        err = EVENTS_IMPORT_ERROR or "events.py not found"
+        st.error(f"Events Calendar unavailable: {err}")
     else:
         with st.expander("Why Events Matter for Trading (Click to learn)"):
             st.markdown("""
@@ -1479,18 +1495,18 @@ with events_tab:
 
         col_e1, col_e2 = st.columns([1, 3])
         with col_e1:
-            fetch_events = st.button("📅 Fetch Events", type="primary")
+            fetch_events = st.button("🔄 Refresh Events", type="primary")
 
-        if fetch_events or 'events_data' in st.session_state:
-            if fetch_events:
-                with st.spinner("Fetching earnings and dividend calendars..."):
-                    try:
-                        st.session_state['events_data'] = events_module.get_all_events(config.SYMBOLS)
-                    except Exception as e:
-                        st.error(f"Events fetch error: {e}")
+        # Auto-load on first visit; refresh button forces a re-fetch
+        if 'events_data' not in st.session_state or fetch_events:
+            with st.spinner("Fetching earnings and dividend calendars..."):
+                try:
+                    st.session_state['events_data'] = events_module.get_all_events(config.SYMBOLS)
+                except Exception as e:
+                    st.error(f"Events fetch error: {e}")
 
+        if 'events_data' in st.session_state:
             events_data = st.session_state.get('events_data', {})
-
             if events_data:
                 high_risk = events_data.get('high_risk_symbols', [])
                 if high_risk:
@@ -1560,5 +1576,3 @@ with events_tab:
                 last_updated = events_data.get('last_updated', '')
                 if last_updated:
                     st.caption(f"Last updated: {last_updated[:19]}")
-        else:
-            st.info("Click **'Fetch Events'** to load the earnings and dividend calendar.")
